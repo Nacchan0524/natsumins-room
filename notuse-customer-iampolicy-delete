@@ -1,0 +1,69 @@
+#!/bin/bash
+
+set -e
+
+handle_error() {
+    echo "An error occurred on line $1."
+    exit 1
+}
+trap 'handle_error $LINENO' ERR
+
+next_token=""
+delete_arns=()
+
+# Step 1: Gather the policies that are eligible for deletion
+while :; do
+    if [[ -z "$next_token" ]]; then
+        echo "Fetching policies..."
+        policies=$(aws iam list-policies --scope Local)
+    else
+        echo "Fetching policies with next_token: $next_token"
+        policies=$(aws iam list-policies --scope Local --starting-token "$next_token")
+    fi
+    
+    delete_targets=$(echo "$policies" | jq -rc '.Policies[] | select(.AttachmentCount == 0 and .PermissionsBoundaryUsageCount == 0)')
+
+    for t in $delete_targets; do
+        policy_arn=$(echo "$t" | jq -r '.Arn')
+        delete_arns+=("$policy_arn")
+    done
+
+    next_token=$(echo "$policies" | jq -r '.NextToken')
+    if [[ "$next_token" == "null" ]]; then
+        break
+    fi
+done
+
+# Step 2: Display the policies to be deleted and ask for confirmation
+if [ ${#delete_arns[@]} -eq 0 ]; then
+    echo "No policies to delete."
+    exit 0
+fi
+
+echo "The following policies will be deleted:"
+for arn in "${delete_arns[@]}"; do
+    echo "$arn"
+done
+
+read -p "Do you want to continue with deletion? (y/n): " confirm
+if [[ "$confirm" != "y" ]]; then
+    echo "Aborting script."
+    exit 0
+fi
+
+# Step 3: Proceed with the deletion if confirmed
+for policy_arn in "${delete_arns[@]}"; do
+    versions=$(aws iam list-policy-versions --policy-arn "$policy_arn")
+    for v in $(echo "$versions" | jq -rc '.Versions[]'); do
+        if [[ $(echo "$v" | jq -r '.IsDefaultVersion') == "false" ]]; then
+            version_id=$(echo "$v" | jq -r '.VersionId')
+            echo "Deleting policy version: $version_id"
+            aws iam delete-policy-version --policy-arn "$policy_arn" --version-id "$version_id"
+        fi
+    done
+
+    echo "Deleting policy: $policy_arn"
+    aws iam delete-policy --policy-arn "$policy_arn"
+done
+
+echo "Script completed successfully."
