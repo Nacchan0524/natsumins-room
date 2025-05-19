@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'VPCとEC2インスタンスを作成するCloudFormationテンプレート'
+
+Parameters:
+  EnvironmentName:
+    Description: 環境名（開発、テスト、本番など）
+    Type: String
+    Default: Development
+    
+  VpcCIDR:
+    Description: VPCのCIDRブロック
+    Type: String
+    Default: 10.0.0.0/16
+    
+  PublicSubnet1CIDR:
+    Description: パブリックサブネット1のCIDRブロック
+    Type: String
+    Default: 10.0.1.0/24
+    
+  PublicSubnet2CIDR:
+    Description: パブリックサブネット2のCIDRブロック
+    Type: String
+    Default: 10.0.2.0/24
+    
+  PrivateSubnet1CIDR:
+    Description: プライベートサブネット1のCIDRブロック
+    Type: String
+    Default: 10.0.3.0/24
+    
+  PrivateSubnet2CIDR:
+    Description: プライベートサブネット2のCIDRブロック
+    Type: String
+    Default: 10.0.4.0/24
+    
+  InstanceType:
+    Description: EC2インスタンスタイプ
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t3.micro
+      - t3.small
+      - t3.medium
+    
+  KeyName:
+    Description: EC2インスタンスにアクセスするためのキーペア名
+    Type: AWS::EC2::KeyPair::KeyName
+    
+  SSHLocation:
+    Description: SSHアクセスを許可するIPアドレス範囲
+    Type: String
+    Default: 0.0.0.0/0
+    
+Resources:
+  # VPCの作成
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-VPC
+          
+  # インターネットゲートウェイの作成
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-IGW
+          
+  # インターネットゲートウェイをVPCにアタッチ
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+      
+  # パブリックサブネット1の作成
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PublicSubnet1
+          
+  # パブリックサブネット2の作成
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PublicSubnet2
+          
+  # プライベートサブネット1の作成
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PrivateSubnet1
+          
+  # プライベートサブネット2の作成
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PrivateSubnet2
+          
+  # パブリックルートテーブルの作成
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PublicRouteTable
+          
+  # パブリックルートの作成（インターネットゲートウェイへのルート）
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      
+  # パブリックサブネット1とルートテーブルの関連付け
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+      
+  # パブリックサブネット2とルートテーブルの関連付け
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+      
+  # プライベートルートテーブルの作成
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PrivateRouteTable
+          
+  # プライベートサブネット1とルートテーブルの関連付け
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+      
+  # プライベートサブネット2とルートテーブルの関連付け
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+      
+  # EC2インスタンス用のセキュリティグループ
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: EC2インスタンス用のセキュリティグループ
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-EC2SecurityGroup
+          
+  # EC2インスタンスの作成
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds:
+        - !GetAtt EC2SecurityGroup.GroupId
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet1
+      ImageId: !Ref LatestAmiId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-EC2Instance
+          
+  # 最新のAmazon Linux 2 AMIを取得するためのパラメータ
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    
+Outputs:
+  VPC:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${EnvironmentName}-VPC
+      
+  PublicSubnets:
+    Description: パブリックサブネットのリスト
+    Value: !Join [ ",", [ !Ref PublicSubnet1, !Ref PublicSubnet2 ] ]
+    Export:
+      Name: !Sub ${EnvironmentName}-PublicSubnets
+      
+  PrivateSubnets:
+    Description: プライベートサブネットのリスト
+    Value: !Join [ ",", [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ] ]
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateSubnets
+      
+  EC2InstanceId:
+    Description: EC2インスタンスID
+    Value: !Ref EC2Instance
+    
+  EC2PublicIP:
+    Description: EC2インスタンスのパブリックIP
+    Value: !GetAtt EC2Instance.PublicIp
+    
+  EC2PublicDNS:
+    Description: EC2インスタンスのパブリックDNS
+    Value: !GetAtt EC2Instance.PublicDnsName

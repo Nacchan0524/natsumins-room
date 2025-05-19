@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'シンプルなVPCとEC2インスタンスを作成するCloudFormationテンプレート'
+
+Parameters:
+  VpcCIDR:
+    Description: VPCのCIDRブロック
+    Type: String
+    Default: 10.0.0.0/16
+    
+  SubnetCIDR:
+    Description: パブリックサブネットのCIDRブロック
+    Type: String
+    Default: 10.0.1.0/24
+    
+  InstanceType:
+    Description: EC2インスタンスタイプ
+    Type: String
+    Default: t2.micro
+    
+  KeyName:
+    Description: EC2インスタンスにアクセスするためのキーペア名
+    Type: AWS::EC2::KeyPair::KeyName
+    
+Resources:
+  # VPCの作成
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: SimpleVPC
+          
+  # インターネットゲートウェイの作成
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: SimpleIGW
+          
+  # インターネットゲートウェイをVPCにアタッチ
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+      
+  # パブリックサブネットの作成
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref SubnetCIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnet
+          
+  # パブリックルートテーブルの作成
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+          
+  # パブリックルートの作成（インターネットゲートウェイへのルート）
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      
+  # パブリックサブネットとルートテーブルの関連付け
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+      
+  # EC2インスタンス用のセキュリティグループ
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: EC2インスタンス用のセキュリティグループ
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: EC2SecurityGroup
+          
+  # EC2インスタンスの作成
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds:
+        - !GetAtt EC2SecurityGroup.GroupId
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet
+      ImageId: !Ref LatestAmiId
+      Tags:
+        - Key: Name
+          Value: SimpleEC2Instance
+          
+  # 最新のAmazon Linux 2 AMIを取得するためのパラメータ
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    
+Outputs:
+  VPC:
+    Description: VPC ID
+    Value: !Ref VPC
+      
+  PublicSubnet:
+    Description: パブリックサブネットID
+    Value: !Ref PublicSubnet
+      
+  EC2InstanceId:
+    Description: EC2インスタンスID
+    Value: !Ref EC2Instance
+    
+  EC2PublicIP:
+    Description: EC2インスタンスのパブリックIP
+    Value: !GetAtt EC2Instance.PublicIp
